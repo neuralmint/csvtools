@@ -19,7 +19,6 @@ import sys
 import os
 from io import StringIO
 
-BTC_ADDR = "bc1q6ud0w3036ye2vfzkftwywarqswqu3jehs4nqe7"
 
 def read_csv(path):
     with open(path, newline='', encoding='utf-8-sig') as f:
