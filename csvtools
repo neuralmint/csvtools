@@ -134,7 +134,6 @@ Usage:
   csvtools to-md <file>      Convert to markdown table
   csvtools clean <file>      Remove empty rows
 
-Donations: {BTC_ADDR_DISPLAY} (BTC)""")
 
 def main():
     if len(sys.argv) < 3:
