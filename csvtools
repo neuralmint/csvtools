@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""
+csvtools — View, filter, clean, and convert CSV files from the terminal.
+
+Usage:
+    csvtools view <file.csv>              Pretty-print a CSV
+    csvtools head <file.csv> [n]          First n rows (default 10)
+    csvtools cols <file.csv>              List column names + types
+    csvtools filter <file.csv> <col> <val>  Filter rows where col=val
+    csvtools stats <file.csv>             Basic statistics on numeric columns
+    csvtools to-json <file.csv>           Convert CSV to JSON
+    csvtools to-md <file.csv>             Convert CSV to markdown table
+    csvtools clean <file.csv>             Remove empty rows, trim whitespace
+"""
+
+import csv
+import json
+import sys
+import os
+from io import StringIO
+
+BTC_ADDR = "bc1q6ud0w3036ye2vfzkftwywarqswqu3jehs4nqe7"
+
+def read_csv(path):
+    with open(path, newline='', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    return rows, reader.fieldnames
+
+def cmd_view(path):
+    rows, cols = read_csv(path)
+    if not rows:
+        print("Empty CSV")
+        return
+    # Calculate column widths
+    widths = {c: len(c) for c in cols}
+    for row in rows[:50]:
+        for c in cols:
+            widths[c] = max(widths[c], len(str(row.get(c, ""))))
+    # Print header
+    sep = "+" + "+".join("-" * (w + 2) for w in widths.values()) + "+"
+    print(sep)
+    print("| " + " | ".join(c.ljust(widths[c]) for c in cols) + " |")
+    print(sep)
+    for row in rows[:50]:
+        print("| " + " | ".join(str(row.get(c, "")).ljust(widths[c]) for c in cols) + " |")
+    print(sep)
+    if len(rows) > 50:
+        print(f"... and {len(rows) - 50} more rows")
+
+def cmd_head(path, n=10):
+    rows, cols = read_csv(path)
+    for i, row in enumerate(rows[:n]):
+        print(f"{i+1:>4}.  " + "  |  ".join(f"{c}={row[c]}" for c in cols[:4]))
+        if len(cols) > 4:
+            print(f"       ... +{len(cols)-4} more columns")
+        print()
+
+def cmd_cols(path):
+    rows, cols = read_csv(path)
+    for c in cols:
+        vals = [r.get(c, "") for r in rows if r.get(c, "")]
+        numeric = all(v.replace(".", "").replace("-", "").isdigit() for v in vals if v)
+        t = "number" if numeric and vals else "text"
+        unique = len(set(vals))
+        print(f"  {c:<20}  {t:<8}  {len(vals)} values, {unique} unique")
+
+def cmd_filter(path, col, val):
+    rows, cols = read_csv(path)
+    filtered = [r for r in rows if r.get(col, "").lower() == val.lower()]
+    print(f"Filtered: {len(filtered)} of {len(rows)} rows\n")
+    for r in filtered[:20]:
+        print("  " + " | ".join(f"{c}={r[c]}" for c in cols[:5]))
+        if len(cols) > 5:
+            print("    ...")
+        print()
+    if len(filtered) > 20:
+        print(f"... and {len(filtered)-20} more")
+
+def cmd_stats(path):
+    rows, cols = read_csv(path)
+    for c in cols:
+        vals = []
+        for r in rows:
+            v = r.get(c, "").strip()
+            try:
+                vals.append(float(v))
+            except ValueError:
+                pass
+        if vals:
+            print(f"  {c}:")
+            print(f"    count:   {len(vals)}")
+            print(f"    min:     {min(vals)}")
+            print(f"    max:     {max(vals)}")
+            print(f"    avg:     {sum(vals)/len(vals):.2f}")
+            print()
+
+def cmd_to_json(path):
+    rows, cols = read_csv(path)
+    print(json.dumps(rows, indent=2))
+
+def cmd_to_md(path):
+    rows, cols = read_csv(path)
+    print("| " + " | ".join(cols) + " |")
+    print("|" + "|".join("---" for _ in cols) + "|")
+    for row in rows[:30]:
+        print("| " + " | ".join(str(row.get(c, "")).replace("|", "\\|") for c in cols) + " |")
+    if len(rows) > 30:
+        print(f"| *... and {len(rows)-30} more rows* |")
+
+def cmd_clean(path):
+    rows, cols = read_csv(path)
+    cleaned = []
+    for r in rows:
+        r = {k: v.strip() for k, v in r.items()}
+        if any(v for v in r.values()):
+            cleaned.append(r)
+    out = sys.stdout
+    writer = csv.DictWriter(out, fieldnames=cols)
+    writer.writeheader()
+    writer.writerows(cleaned)
+    print(f"\nCleaned: {len(cleaned)} rows (removed {len(rows)-len(cleaned)} empty)", file=sys.stderr)
+
+def print_usage():
+    BTC_ADDR_DISPLAY = BTC_ADDR
+    print(f"""csvtools — CSV utilities for the terminal
+
+Usage:
+  csvtools view <file>       Pretty-print CSV
+  csvtools head <file> [n]   First n rows
+  csvtools cols <file>       List columns
+  csvtools filter <f> <c> <v>  Filter rows
+  csvtools stats <file>      Column statistics
+  csvtools to-json <file>    Convert to JSON
+  csvtools to-md <file>      Convert to markdown table
+  csvtools clean <file>      Remove empty rows
+
+Donations: {BTC_ADDR_DISPLAY} (BTC)""")
+
+def main():
+    if len(sys.argv) < 3:
+        print_usage()
+        return
+    
+    cmd = sys.argv[1]
+    path = sys.argv[2]
+    
+    if not os.path.exists(path):
+        print(f"File not found: {path}")
+        return
+    
+    cmds = {
+        "view": lambda: cmd_view(path),
+        "head": lambda: cmd_head(path, int(sys.argv[3]) if len(sys.argv) > 3 else 10),
+        "cols": lambda: cmd_cols(path),
+        "filter": lambda: cmd_filter(path, sys.argv[3], sys.argv[4]) if len(sys.argv) > 4 else print("Need col and val"),
+        "stats": lambda: cmd_stats(path),
+        "to-json": lambda: cmd_to_json(path),
+        "to-md": lambda: cmd_to_md(path),
+        "clean": lambda: cmd_clean(path),
+    }
+    
+    if cmd in cmds:
+        cmds[cmd]()
+    else:
+        print(f"Unknown command: {cmd}")
+        print_usage()
+
+if __name__ == "__main__":
+    main()
